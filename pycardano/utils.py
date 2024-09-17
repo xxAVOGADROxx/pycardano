@@ -97,7 +97,7 @@ def fee(
     )
 
 
-def max_tx_fee(context: ChainContext) -> int:
+def max_tx_fee(context: ChainContext, ref_script_size: int = 0) -> int:
     """Calculate the maximum possible transaction fee based on protocol parameters.
 
     Args:
@@ -111,6 +111,7 @@ def max_tx_fee(context: ChainContext) -> int:
         context.protocol_param.max_tx_size,
         context.protocol_param.max_tx_ex_steps,
         context.protocol_param.max_tx_ex_mem,
+        ref_script_size,
     )
 
 
