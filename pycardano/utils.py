@@ -102,6 +102,7 @@ def max_tx_fee(context: ChainContext, ref_script_size: int = 0) -> int:
 
     Args:
         context (ChainContext): A chain context.
+        ref_script_size (int): Size of reference scripts in the transaction.
 
     Returns:
         int: Maximum possible tx fee in lovelace.
