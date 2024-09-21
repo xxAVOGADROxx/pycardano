@@ -550,8 +550,18 @@ class TransactionBuilder:
         if self.mint:
             for policy_id, assets in self.mint.items():
                 for asset_name, quantity in assets.items():
+                    # Ensure the policy_id exists in provided.multi_asset
+                    if policy_id not in provided.multi_asset:
+                        provided.multi_asset[policy_id] = Asset()
+
+                    # Ensure the asset_name exists in the policy_id
+                    if asset_name not in provided.multi_asset[policy_id]:
+                        provided.multi_asset[policy_id][asset_name] = 0
+
+                    # Add the quantity
                     provided.multi_asset[policy_id][asset_name] += quantity
 
+            # Now remove any assets that have zero quantity
             for policy_id in list(provided.multi_asset.keys()):
                 new_asset = Asset(
                     {
