@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from pycardano import RedeemerKey, RedeemerMap, RedeemerValue
+from pycardano import AssetName, RedeemerKey, RedeemerMap, RedeemerValue
 from pycardano.address import Address
 from pycardano.certificate import (
     PoolRegistration,
@@ -572,7 +572,8 @@ def test_add_script_input(chain_context):
     )
     tx_builder.add_output(TransactionOutput(receiver, 5000000))
     tx_builder.build(change_address=receiver)
-    witness = tx_builder.build_witness_set(post_chang=False)
+    tx_builder.use_redeemer_map = False
+    witness = tx_builder.build_witness_set()
     assert [datum] == witness.plutus_data
     assert [redeemer1, redeemer2] == witness.redeemer
     assert [plutus_script] == witness.plutus_v1_script
@@ -603,7 +604,10 @@ def test_add_script_input_no_script(chain_context):
     )
     tx_builder.add_output(TransactionOutput(receiver, 5000000))
     tx_builder.build(change_address=receiver)
-    witness = tx_builder.build_witness_set(remove_dup_script=True, post_chang=False)
+    tx_builder.use_redeemer_map = False
+    witness = tx_builder.build_witness_set(
+        remove_dup_script=True,
+    )
     assert [datum] == witness.plutus_data
     assert [redeemer] == witness.redeemer
     assert witness.plutus_v1_script is None
@@ -671,7 +675,8 @@ def test_add_script_input_find_script(chain_context):
         )
         tx_builder.add_output(TransactionOutput(receiver, 5000000))
         tx_body = tx_builder.build(change_address=receiver)
-        witness = tx_builder.build_witness_set(post_chang=False)
+        tx_builder.use_redeemer_map = False
+        witness = tx_builder.build_witness_set()
         assert [datum] == witness.plutus_data
         assert [redeemer] == witness.redeemer
         assert witness.plutus_v1_script is None
@@ -710,7 +715,8 @@ def test_add_script_input_with_script_from_specified_utxo(chain_context):
     )
     tx_builder.add_output(TransactionOutput(receiver, 5000000))
     tx_body = tx_builder.build(change_address=receiver)
-    witness = tx_builder.build_witness_set(post_chang=False)
+    tx_builder.use_redeemer_map = False
+    witness = tx_builder.build_witness_set()
     assert [datum] == witness.plutus_data
     assert [redeemer] == witness.redeemer
     assert witness.plutus_v2_script is None
@@ -981,7 +987,8 @@ def test_add_minting_script_from_specified_utxo(chain_context):
     tx_builder.add_output(TransactionOutput(receiver, 5000000))
     tx_builder.mint = mint
     tx_body = tx_builder.build(change_address=receiver)
-    witness = tx_builder.build_witness_set(post_chang=False)
+    tx_builder.use_redeemer_map = False
+    witness = tx_builder.build_witness_set()
     assert witness.plutus_data is None
     assert [redeemer] == witness.redeemer
     assert witness.plutus_v2_script is None
@@ -1110,7 +1117,8 @@ def test_add_minting_script(chain_context):
     )
     tx_builder.add_output(TransactionOutput(receiver, Value(5000000, mint)))
     tx_builder.build(change_address=receiver)
-    witness = tx_builder.build_witness_set(post_chang=False)
+    tx_builder.use_redeemer_map = False
+    witness = tx_builder.build_witness_set()
     assert [plutus_script] == witness.plutus_v1_script
 
 
@@ -1132,7 +1140,8 @@ def test_add_minting_script_only(chain_context):
     )
     tx_builder.add_output(TransactionOutput(receiver, Value(5000000, mint)))
     tx_builder.build(change_address=receiver)
-    witness = tx_builder.build_witness_set(post_chang=False)
+    tx_builder.use_redeemer_map = False
+    witness = tx_builder.build_witness_set()
     assert [plutus_script] == witness.plutus_v1_script
 
 
@@ -1237,7 +1246,8 @@ def test_estimate_execution_unit(chain_context):
     )
     tx_builder.add_output(TransactionOutput(receiver, 5000000))
     tx_builder.build(change_address=receiver)
-    witness = tx_builder.build_witness_set(post_chang=False)
+    tx_builder.use_redeemer_map = False
+    witness = tx_builder.build_witness_set()
     assert [datum] == witness.plutus_data
     assert [redeemer1] == witness.redeemer
     assert redeemer1.ex_units is not None
@@ -1351,6 +1361,88 @@ def test_tx_builder_certificates(chain_context):
     }
 
     assert expected == tx_body.to_primitive()
+
+
+def test_tx_builder_certificates_script(chain_context):
+    tx_builder = TransactionBuilder(chain_context, [RandomImproveMultiAsset([0, 0])])
+    sender = "addr_test1vrm9x2zsux7va6w892g38tvchnzahvcd9tykqf3ygnmwtaqyfg52x"
+    sender_address = Address.from_primitive(sender)
+
+    plutus_script = PlutusV2Script(b"dummy test script")
+    script_hash = plutus_script_hash(plutus_script)
+
+    stake_credential = StakeCredential(script_hash)
+
+    pool_hash = PoolKeyHash(b"1" * POOL_KEY_HASH_SIZE)
+
+    stake_registration = StakeRegistration(stake_credential)
+
+    stake_delegation = StakeDelegation(stake_credential, pool_hash)
+
+    # Add sender address as input
+    tx_builder.add_input_address(sender).add_output(
+        TransactionOutput.from_primitive([sender, 500000])
+    )
+
+    tx_builder.certificates = [stake_registration, stake_delegation]
+    redeemer = Redeemer(PlutusData(), ExecutionUnits(100000, 1000000))
+    tx_builder.add_certificate_script(plutus_script, redeemer=redeemer)
+    tx_builder.ttl = 123456
+
+    tx_builder.build(change_address=sender_address)
+    tx_builder.use_redeemer_map = False
+    witness = tx_builder.build_witness_set()
+    assert [redeemer] == witness.redeemer
+    assert witness.redeemer[0].index == 1
+    assert [plutus_script] == witness.plutus_v2_script
+
+
+def test_tx_builder_cert_redeemer_wrong_tag(chain_context):
+    tx_builder = TransactionBuilder(chain_context)
+    plutus_script = PlutusV2Script(b"dummy test script")
+    redeemer = Redeemer(PlutusData(), ExecutionUnits(100000, 1000000))
+    redeemer.tag = RedeemerTag.MINT
+    with pytest.raises(InvalidArgumentException) as e:
+        tx_builder.add_certificate_script(plutus_script, redeemer=redeemer)
+
+
+def test_add_cert_script_from_utxo(chain_context):
+    tx_builder = TransactionBuilder(chain_context)
+    sender = "addr_test1vrm9x2zsux7va6w892g38tvchnzahvcd9tykqf3ygnmwtaqyfg52x"
+    sender_address = Address.from_primitive(sender)
+    plutus_script = PlutusV2Script(b"dummy test script")
+    script_hash = plutus_script_hash(plutus_script)
+    script_address = Address(script_hash)
+    existing_script_utxo = UTxO(
+        TransactionInput.from_primitive(
+            [
+                "41cb004bec7051621b19b46aea28f0657a586a05ce2013152ea9b9f1a5614cc7",
+                1,
+            ]
+        ),
+        TransactionOutput(script_address, 1234567, script=plutus_script),
+    )
+
+    stake_credential = StakeCredential(script_hash)
+    pool_hash = PoolKeyHash(b"1" * POOL_KEY_HASH_SIZE)
+    stake_registration = StakeRegistration(stake_credential)
+    stake_delegation = StakeDelegation(stake_credential, pool_hash)
+    tx_builder.certificates = [stake_registration, stake_delegation]
+    tx_builder.add_input_address(sender).add_output(
+        TransactionOutput.from_primitive([sender, 500000])
+    )
+
+    redeemer = Redeemer(PlutusData(), ExecutionUnits(100000, 1000000))
+    tx_builder.add_certificate_script(existing_script_utxo, redeemer=redeemer)
+    tx_builder.ttl = 123456
+
+    tx_body = tx_builder.build(change_address=sender_address)
+    tx_builder.use_redeemer_map = False
+    witness = tx_builder.build_witness_set()
+    assert witness.plutus_data is None
+    assert [redeemer] == witness.redeemer
+    assert witness.plutus_v2_script is None
+    assert [existing_script_utxo.input] == tx_body.reference_inputs
 
 
 def test_tx_builder_stake_pool_registration(chain_context, pool_params):
@@ -1931,3 +2023,104 @@ def test_transaction_witness_set_no_redeemers(chain_context):
     tx_builder = TransactionBuilder(chain_context)
     witness_set = tx_builder.build_witness_set()
     assert witness_set.redeemer is None
+
+
+def test_burning_all_assets_under_single_policy(chain_context):
+    """
+    Test burning all assets under a single policy with TransactionBuilder.
+
+    This test ensures that burning multiple assets (AssetName1, AssetName2, AssetName3, AssetName4)
+    under policy_id_1 removes them from the multi-asset map.
+
+    Steps:
+    1. Define assets under policy_id_1 and simulate burning 1 unit of each.
+    2. Add UTXOs for the assets and burning instructions.
+    3. Build the transaction and verify that all burned assets are removed.
+
+    Args:
+        chain_context: The blockchain context.
+
+    Assertions:
+        - AssetName1, AssetName2, AssetName3, and AssetName4 are removed after burning.
+    """
+    tx_builder = TransactionBuilder(chain_context)
+
+    # Create change address
+    sender = "addr_test1vrm9x2zsux7va6w892g38tvchnzahvcd9tykqf3ygnmwtaqyfg52x"
+    sender_address = Address.from_primitive(sender)
+
+    # Create four transaction inputs
+    tx_in1 = TransactionInput.from_primitive(
+        ["a6cbe6cadecd3f89b60e08e68e5e6c7d72d730aaa1ad21431590f7e6643438ef", 0]
+    )
+    tx_in2 = TransactionInput.from_primitive(
+        ["b6cbe6cadecd3f89b60e08e68e5e6c7d72d730aaa1ad21431590f7e6643438ef", 1]
+    )
+    tx_in3 = TransactionInput.from_primitive(
+        ["c6cbe6cadecd3f89b60e08e68e5e6c7d72d730aaa1ad21431590f7e6643438ef", 2]
+    )
+    tx_in4 = TransactionInput.from_primitive(
+        ["d6cbe6cadecd3f89b60e08e68e5e6c7d72d730aaa1ad21431590f7e6643438ef", 3]
+    )
+    # Define a policy ID and asset names
+    policy_id_1 = plutus_script_hash(PlutusV1Script(b"dummy script1"))
+    multi_asset1 = MultiAsset.from_primitive({policy_id_1.payload: {b"AssetName1": 1}})
+    multi_asset2 = MultiAsset.from_primitive({policy_id_1.payload: {b"AssetName2": 1}})
+    multi_asset3 = MultiAsset.from_primitive(
+        {
+            policy_id_1.payload: {b"AssetName3": 1},
+        }
+    )
+    multi_asset4 = MultiAsset.from_primitive(
+        {
+            policy_id_1.payload: {b"AssetName4": 1},
+        }
+    )
+
+    # Simulate minting and burning of assets
+    mint = MultiAsset.from_primitive(
+        {
+            policy_id_1.payload: {
+                b"AssetName1": -1,
+                b"AssetName2": -1,
+                b"AssetName3": -1,
+                b"AssetName4": -1,
+            }
+        }
+    )
+
+    # Set UTXO for the inputs
+    utxo1 = UTxO(
+        tx_in1, TransactionOutput(Address(policy_id_1), Value(10000000, multi_asset1))
+    )
+    utxo2 = UTxO(
+        tx_in2, TransactionOutput(Address(policy_id_1), Value(10000000, multi_asset2))
+    )
+    utxo3 = UTxO(
+        tx_in3, TransactionOutput(Address(policy_id_1), Value(10000000, multi_asset3))
+    )
+    utxo4 = UTxO(
+        tx_in4, TransactionOutput(Address(policy_id_1), Value(10000000, multi_asset4))
+    )
+
+    # Add UTXO inputs
+    tx_builder.add_input(utxo1).add_input(utxo2).add_input(utxo3).add_input(utxo4)
+
+    # Add the minting to the builder
+    tx_builder.mint = mint
+
+    # Build the transaction
+    tx = tx_builder.build(change_address=sender_address)
+
+    # Check that the transaction has outputs
+    assert tx.outputs
+
+    # Loop through the transaction outputs to verify the multi-asset quantities
+    for output in tx.outputs:
+        multi_asset = output.amount.multi_asset
+
+        # Ensure that AssetName1, AssetName2, AssetName3 and AssetName4 were burnt (removed)
+        assert AssetName(b"AssetName1") not in multi_asset.get(policy_id_1, {})
+        assert AssetName(b"AssetName2") not in multi_asset.get(policy_id_1, {})
+        assert AssetName(b"AssetName3") not in multi_asset.get(policy_id_1, {})
+        assert AssetName(b"AseetName4") not in multi_asset.get(policy_id_1, {})

@@ -124,6 +124,9 @@ class TransactionBuilder:
 
     initial_stake_pool_registration: Optional[bool] = field(default=False)
 
+    use_redeemer_map: Optional[bool] = field(default=True)
+    """Whether to serialize redeemers as a map or a list. Default is True."""
+
     _inputs: List[UTxO] = field(init=False, default_factory=lambda: [])
 
     _potential_inputs: List[UTxO] = field(init=False, default_factory=lambda: [])
@@ -153,6 +156,10 @@ class TransactionBuilder:
     )
 
     _withdrawal_script_to_redeemers: List[Tuple[ScriptType, Optional[Redeemer]]] = (
+        field(init=False, default_factory=lambda: [])
+    )
+
+    _certificate_script_to_redeemers: List[Tuple[ScriptType, Optional[Redeemer]]] = (
         field(init=False, default_factory=lambda: [])
     )
 
@@ -381,6 +388,49 @@ class TransactionBuilder:
             self._withdrawal_script_to_redeemers.append((script, redeemer))
         return self
 
+    def add_certificate_script(
+        self,
+        script: Union[
+            UTxO, NativeScript, PlutusV1Script, PlutusV2Script, PlutusV3Script
+        ],
+        redeemer: Optional[Redeemer] = None,
+    ) -> TransactionBuilder:
+        """Add a certificate script along with its redeemer to this transaction.
+        WARNING: The order of operations matters.
+        The index of the redeemer will be set to the index of the last certificate added.
+
+        Args:
+            script (Union[UTxO, PlutusV1Script, PlutusV2Script, PlutusV3Script]): A plutus script.
+            redeemer (Optional[Redeemer]): A plutus redeemer to unlock the UTxO.
+
+        Returns:
+            TransactionBuilder: Current transaction builder.
+        """
+        if redeemer:
+            if redeemer.tag is not None and redeemer.tag != RedeemerTag.CERTIFICATE:
+                raise InvalidArgumentException(
+                    f"Expect the redeemer tag's type to be {RedeemerTag.CERTIFICATE}, "
+                    f"but got {redeemer.tag} instead."
+                )
+            assert self.certificates is not None and len(self.certificates) >= 1, (
+                "self.certificates is None. redeemer.index needs to be set to the index of the corresponding"
+                "certificate (defaulting to the last certificate) however no certificates could be found"
+            )
+            redeemer.index = len(self.certificates) - 1
+            redeemer.tag = RedeemerTag.CERTIFICATE
+            self._consolidate_redeemer(redeemer)
+
+        if isinstance(script, UTxO):
+            assert script.output.script is not None
+            self._certificate_script_to_redeemers.append(
+                (script.output.script, redeemer)
+            )
+            self.reference_inputs.add(script)
+            self._reference_scripts.append(script.output.script)
+        else:
+            self._certificate_script_to_redeemers.append((script, redeemer))
+        return self
+
     def add_input_address(self, address: Union[Address, str]) -> TransactionBuilder:
         """Add an address to transaction's input address.
         Unlike :meth:`add_input`, which deterministically adds a UTxO to the transaction's inputs, `add_input_address`
@@ -469,6 +519,9 @@ class TransactionBuilder:
         for s, _ in self._withdrawal_script_to_redeemers:
             scripts[script_hash(s)] = s
 
+        for s, _ in self._certificate_script_to_redeemers:
+            scripts[script_hash(s)] = s
+
         return list(scripts.values())
 
     @property
@@ -494,23 +547,30 @@ class TransactionBuilder:
             [r for r in self._inputs_to_redeemers.values() if r is not None]
             + [r for _, r in self._minting_script_to_redeemers if r is not None]
             + [r for _, r in self._withdrawal_script_to_redeemers if r is not None]
+            + [r for _, r in self._certificate_script_to_redeemers if r is not None]
         )
 
-    def redeemers(self) -> RedeemerMap:
-        redeemers = RedeemerMap()
-        for r in self._redeemer_list:
-            if r.tag is None:
-                raise InvalidArgumentException(
-                    f"Redeemer tag is not set. Redeemer: {r}"
-                )
-            if r.ex_units is None:
-                raise InvalidArgumentException(
-                    f"Execution units are not set. Redeemer: {r}"
-                )
-            k = RedeemerKey(r.tag, r.index)
-            v = RedeemerValue(r.data, r.ex_units)
-            redeemers[k] = v
-        return redeemers
+    def redeemers(self) -> Redeemers:
+        redeemer_list = self._redeemer_list
+
+        # We have to serialize redeemers as a map if there are no redeemers
+        if self.use_redeemer_map or not redeemer_list:
+            redeemers = RedeemerMap()
+            for r in redeemer_list:
+                if r.tag is None:
+                    raise InvalidArgumentException(
+                        f"Redeemer tag is not set. Redeemer: {r}"
+                    )
+                if r.ex_units is None:
+                    raise InvalidArgumentException(
+                        f"Execution units are not set. Redeemer: {r}"
+                    )
+                k = RedeemerKey(r.tag, r.index)
+                v = RedeemerValue(r.data, r.ex_units)
+                redeemers[k] = v
+            return redeemers
+        else:
+            return redeemer_list
 
     @property
     def script_data_hash(self) -> Optional[ScriptDataHash]:
@@ -547,8 +607,10 @@ class TransactionBuilder:
         provided = Value()
         for i in inputs:
             provided += i.output.amount
+
         if self.mint:
             provided.multi_asset += self.mint
+
         if self.withdrawals:
             for v in self.withdrawals.values():
                 provided.coin += v
@@ -868,6 +930,8 @@ class TransactionBuilder:
     def _set_redeemer_index(self):
         # Set redeemers' index according to section 4.1 in
         # https://hydra.iohk.io/build/13099856/download/1/alonzo-changes.pdf
+        #
+        # There is no way to determine certificate index here
 
         if self.mint:
             sorted_mint_policies = sorted(self.mint.keys(), key=lambda x: x.to_cbor())
@@ -971,7 +1035,7 @@ class TransactionBuilder:
         return tx
 
     def build_witness_set(
-        self, remove_dup_script: bool = False, post_chang: bool = True
+        self, remove_dup_script: bool = False
     ) -> TransactionWitnessSet:
         """Build a transaction witness set, excluding verification key witnesses.
         This function is especially useful when the transaction involves Plutus scripts.
@@ -979,7 +1043,6 @@ class TransactionBuilder:
         Args:
             remove_dup_script (bool): Whether to remove scripts, that are already attached to inputs,
              from the witness set.
-            post_chang (bool): Whether to use chang serialization for the witness.
 
         Returns:
             TransactionWitnessSet: A transaction witness set without verification key witnesses.
@@ -1017,19 +1080,12 @@ class TransactionBuilder:
                         f"Unsupported script type: {type(script)}"
                     )
 
-        redeemers: Optional[Redeemers] = None
-        if self._redeemer_list:
-            if not post_chang:
-                redeemers = self._redeemer_list
-            else:
-                redeemers = self.redeemers()
-
         return TransactionWitnessSet(
             native_scripts=native_scripts if native_scripts else None,
             plutus_v1_script=plutus_v1_scripts if plutus_v1_scripts else None,
             plutus_v2_script=plutus_v2_scripts if plutus_v2_scripts else None,
             plutus_v3_script=plutus_v3_scripts if plutus_v3_scripts else None,
-            redeemer=redeemers,
+            redeemer=self.redeemers() if self._redeemer_list else None,
             plutus_data=list(self.datums.values()) if self.datums else None,
         )
 
@@ -1507,5 +1563,8 @@ class TransactionBuilder:
             witness_set.vkey_witnesses.append(
                 VerificationKeyWitness(signing_key.to_verification_key(), signature)
             )
+
+        if len(witness_set.vkey_witnesses) == 0:
+            witness_set.vkey_witnesses = None
 
         return Transaction(tx_body, witness_set, auxiliary_data=self.auxiliary_data)
