@@ -43,8 +43,9 @@ __all__ = ["BlockFrostChainContext"]
 
 
 def _try_fix_script(
-    scripth: str, script: Union[PlutusV1Script, PlutusV2Script, PlutusV3Script]
-) -> Union[PlutusV1Script, PlutusV2Script, PlutusV3Script]:
+    scripth: str,
+    script: Union[PlutusV1Script, PlutusV2Script, PlutusV3Script, NativeScript],
+) -> Union[PlutusV1Script, PlutusV2Script, PlutusV3Script, NativeScript]:
     if str(script_hash(script)) == scripth:
         return script
     else:
@@ -310,8 +311,13 @@ class BlockFrostChainContext(ChainContext):
             cbor = cbor.hex()
         with tempfile.NamedTemporaryFile(delete=False, mode="w") as f:
             f.write(cbor)
-        result = self.api.transaction_evaluate(f.name).result
+
+        result = self.api.transaction_evaluate(f.name)
         os.remove(f.name)
+        if not hasattr(result, "result"):
+            raise TransactionFailedException(result)
+        else:
+            result = result.result
         return_val = {}
         if not hasattr(result, "EvaluationResult"):
             raise TransactionFailedException(result)
