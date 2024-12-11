@@ -49,9 +49,15 @@ class NativeScript(ArrayCBORSerializable):
         elif script_type == ScriptAny._TYPE:
             return super(NativeScript, ScriptAny).from_primitive(value[1:])
         elif script_type == ScriptNofK._TYPE:
-            return super(NativeScript, ScriptNofK).from_primitive(value[1:])
-        elif script_type == InvalidBefore._TYPE:
-            return super(NativeScript, InvalidBefore).from_primitive(value[1:])
+            sub_scripts, required_threshold = (
+                (value[1:][1:], value[1:][:1])
+                if isinstance(value[1:][1], list)
+                else (value[1:][:1], value[1:][1:])
+            )
+            return ScriptNofK(
+                required_threshold[0],
+                [cls.from_primitive(script) for script in sub_scripts[0]],
+            )
         elif script_type == InvalidHereAfter._TYPE:
             return super(NativeScript, InvalidHereAfter).from_primitive(value[1:])
         else:

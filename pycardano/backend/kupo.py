@@ -14,6 +14,7 @@ from pycardano.plutus import (
     PlutusV2Script,
     PlutusV3Script,
 )
+from pycardano.nativescript import NativeScript
 from pycardano.serialization import RawCBOR
 from pycardano.transaction import (
     Asset,
@@ -23,6 +24,7 @@ from pycardano.transaction import (
     TransactionOutput,
     UTxO,
     Value,
+    TransactionId,
 )
 
 __all__ = ["KupoChainContextExtension"]
@@ -186,6 +188,9 @@ class KupoChainContextExtension(ChainContext):
                     elif script["language"] == "plutus:v1":
                         script = PlutusV1Script(bytes.fromhex(script["script"]))
                         script = _try_fix_script(script_hash, script)
+                    elif script["language"] == "native":
+                        script = NativeScript.from_cbor(script["script"])
+                        script = _try_fix_script(script_hash, script)
                     else:
                         raise ValueError("Unknown plutus script type")
 
@@ -197,6 +202,8 @@ class KupoChainContextExtension(ChainContext):
                 )
                 if datum_hash and result.get("datum_type", "inline"):
                     datum = self._get_datum_from_kupo(result["datum_hash"])
+                    if datum:
+                        datum_hash = None
 
                 if not result["value"]["assets"]:
                     tx_out = TransactionOutput(
@@ -253,3 +260,22 @@ class KupoChainContextExtension(ChainContext):
             :class:`TransactionFailedException`: When fails to evaluate the transaction.
         """
         return self._wrapped_backend.evaluate_tx_cbor(cbor)
+
+    async def get_metadata_cbor(
+        self, tx_id: TransactionId, slot: int
+    ) -> Optional[RawCBOR]:
+        """Get metadata cbor from Kupo.
+
+        Args:
+            tx_id (TransactionId): Transaction id for metadata to query.
+            slot (int): Slot number.
+
+        Returns:
+            Optional[RawCBOR]: Metadata cbor."""
+        url_path = f"/metadata/{slot}?transaction_id={tx_id}"
+        result = await self._get(path=url_path)
+        payload = result.json
+        if not payload or len(payload) == 0 or "raw" not in payload[0]:
+            return None
+
+        return RawCBOR(bytes.fromhex(payload[0]["raw"]))

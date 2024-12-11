@@ -536,7 +536,11 @@ def _restore_typed_primitive(
         if not isinstance(v, bytes):
             raise DeserializeException(f"Expected type bytes but got {type(v)}")
         return ByteString(v)
-    elif isclass(t) and t.__name__ in ["PlutusV1Script", "PlutusV2Script"]:
+    elif isclass(t) and t.__name__ in [
+        "PlutusV1Script",
+        "PlutusV2Script",
+        "PlutusV3Script",
+    ]:
         if not isinstance(v, bytes):
             raise DeserializeException(f"Expected type bytes but got {type(v)}")
         return t(v)
@@ -829,8 +833,8 @@ class DictCBORSerializable(CBORSerializable):
         typeguard.TypeCheckError: int is not an instance of str
     """
 
-    KEY_TYPE = Any
-    VALUE_TYPE = Any
+    KEY_TYPE = Type[Any]
+    VALUE_TYPE = Type[Any]
 
     def __init__(self, *args, **kwargs):
         self.data = dict(*args, **kwargs)
@@ -906,12 +910,12 @@ class DictCBORSerializable(CBORSerializable):
         restored = cls()
         for k, v in value.items():
             k = (
-                cls.KEY_TYPE.from_primitive(k)
+                cls.KEY_TYPE.from_primitive(k)  # type: ignore
                 if isclass(cls.KEY_TYPE) and issubclass(cls.KEY_TYPE, CBORSerializable)
                 else k
             )
             v = (
-                cls.VALUE_TYPE.from_primitive(v)
+                cls.VALUE_TYPE.from_primitive(v)  # type: ignore
                 if isclass(cls.VALUE_TYPE)
                 and issubclass(cls.VALUE_TYPE, CBORSerializable)
                 else v
