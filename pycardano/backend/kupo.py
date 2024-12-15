@@ -179,14 +179,11 @@ class KupoChainContextExtension(ChainContext):
                 if script_hash:
                     kupo_script_url = self._kupo_url + "/scripts/" + script_hash
                     script = requests.get(kupo_script_url).json()
-                    if script["language"] == "plutus:v3":
-                        script = PlutusV3Script(bytes.fromhex(script["script"]))
-                        script = _try_fix_script(script_hash, script)
-                    elif script["language"] == "plutus:v2":
-                        script = PlutusV2Script(bytes.fromhex(script["script"]))
-                        script = _try_fix_script(script_hash, script)
-                    elif script["language"] == "plutus:v1":
-                        script = PlutusV1Script(bytes.fromhex(script["script"]))
+                    ver = int(script["language"].removeprefix("plutus:v"))
+                    if 1 <= ver <= 3:
+                        script = PlutusScript.from_version(
+                            ver, bytes.fromhex(script["script"])
+                        )
                         script = _try_fix_script(script_hash, script)
                     elif script["language"] == "native":
                         script = NativeScript.from_cbor(script["script"])
