@@ -20,7 +20,15 @@ from pycardano.exception import TransactionFailedException
 from pycardano.hash import SCRIPT_HASH_SIZE, DatumHash, ScriptHash
 from pycardano.nativescript import NativeScript
 from pycardano.network import Network
-from pycardano.plutus import ExecutionUnits, PlutusScript, ScriptType, script_hash
+from pycardano.plutus import (
+    ExecutionUnits,
+    PlutusScript,
+    ScriptType,
+    script_hash,
+    PlutusV1Script,
+    PlutusV2Script,
+    PlutusV3Script,
+)
 from pycardano.serialization import RawCBOR
 from pycardano.transaction import (
     Asset,
