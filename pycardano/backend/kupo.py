@@ -13,6 +13,7 @@ from pycardano.plutus import (
     PlutusV1Script,
     PlutusV2Script,
     PlutusV3Script,
+    PlutusScript,
 )
 from pycardano.nativescript import NativeScript
 from pycardano.serialization import RawCBOR
